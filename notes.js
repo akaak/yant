@@ -29,11 +29,11 @@ export function initNotesFile(meetingDir, meetingName) {
   const notesPath = path.join(meetingDir, 'notes.md');
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    weekday: 'long', year: 'numeric', month: 'short', day: 'numeric'
   });
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 
-  const header = `# ${meetingName}\n\n**Date:** ${dateStr}  \n**Started:** ${timeStr}\n\n---\n\n`;
+  const header = `## ${dateStr} >> ${meetingName}\n\n**Started:** ${timeStr}\n\n---\n\n`;
   fs.writeFileSync(notesPath, header, 'utf8');
   return notesPath;
 }

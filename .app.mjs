@@ -347,6 +347,7 @@ function MultiLineInput({ onSubmit, placeholder, isActive }) {
   const textRef = useRef(text);
   const cursorRef = useRef(cursor);
   const isActiveRef = useRef(isActive);
+  const shiftEnterRef = useRef(false);
   useEffect(() => {
     textRef.current = text;
   }, [text]);
@@ -361,6 +362,10 @@ function MultiLineInput({ onSubmit, placeholder, isActive }) {
       if (!isActiveRef.current) return;
       const seq = data.toString();
       if (seq === "\x1B[13;2u" || seq === "\x1B\r") {
+        shiftEnterRef.current = true;
+        Promise.resolve().then(() => {
+          shiftEnterRef.current = false;
+        });
         const cur = cursorRef.current;
         const txt = textRef.current;
         const newText = txt.slice(0, cur) + "\n" + txt.slice(cur);
@@ -368,11 +373,12 @@ function MultiLineInput({ onSubmit, placeholder, isActive }) {
         setCursor(cur + 1);
       }
     };
-    process.stdin.on("data", handler);
+    process.stdin.prependListener("data", handler);
     return () => process.stdin.off("data", handler);
   }, []);
   useInput((ch, key) => {
     if (!isActive) return;
+    if (shiftEnterRef.current) return;
     if (key.ctrl) return;
     if (key.return) {
       if (text.trim()) {
@@ -464,6 +470,15 @@ function App() {
   const [screenshotsDir, setScreenshotsDir] = useState(null);
   const [statusMsg, setStatusMsg] = useState(null);
   const [inputDisabled, setInputDisabled] = useState(false);
+  useEffect(() => {
+    process.stdout.write("\x1B[>1u");
+    const restore = () => process.stdout.write("\x1B[<u");
+    process.on("exit", restore);
+    return () => {
+      restore();
+      process.off("exit", restore);
+    };
+  }, []);
   useEffect(() => {
     trackPreviousApp();
   }, []);

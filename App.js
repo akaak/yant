@@ -128,18 +128,26 @@ function MultiLineInput({ onSubmit, placeholder, isActive }) {
   const textRef = useRef(text);
   const cursorRef = useRef(cursor);
   const isActiveRef = useRef(isActive);
+  const shiftEnterRef = useRef(false); // flag to suppress ink's spurious key.return
   useEffect(() => { textRef.current = text; }, [text]);
   useEffect(() => { cursorRef.current = cursor; }, [cursor]);
   useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
 
-  // Intercept raw stdin to catch Shift+Enter across terminals:
-  //   Ghostty / Kitty protocol : \x1b[13;2u
-  //   iTerm2 Option+Enter      : \x1b\r
+  // Use prependListener so our handler fires BEFORE ink's own stdin handler.
+  // ink processes the same data event synchronously and would otherwise insert
+  // the raw escape sequence characters as text before we get a chance to handle it.
   useEffect(() => {
     const handler = (data) => {
       if (!isActiveRef.current) return;
       const seq = data.toString();
+      // Kitty protocol Shift+Enter  (\x1b[13;2u)  — enabled via \x1b[>1u at startup
+      // iTerm2 Option+Enter         (\x1b\r)
       if (seq === '\x1b[13;2u' || seq === '\x1b\r') {
+        // Keep the flag true for the entire synchronous processing tick so that
+        // ALL useInput calls ink makes for this data event are suppressed.
+        shiftEnterRef.current = true;
+        Promise.resolve().then(() => { shiftEnterRef.current = false; });
+
         const cur = cursorRef.current;
         const txt = textRef.current;
         const newText = txt.slice(0, cur) + '\n' + txt.slice(cur);
@@ -147,16 +155,21 @@ function MultiLineInput({ onSubmit, placeholder, isActive }) {
         setCursor(cur + 1);
       }
     };
-    process.stdin.on('data', handler);
+    process.stdin.prependListener('data', handler);
     return () => process.stdin.off('data', handler);
   }, []);
 
   useInput((ch, key) => {
     if (!isActive) return;
+
+    // Suppress ALL input processing when our raw handler just handled Shift+Enter.
+    // ink may call useInput multiple times (once per parsed token) for the same
+    // data event, so we keep the flag set until the microtask resets it.
+    if (shiftEnterRef.current) return;
+
     if (key.ctrl) return; // let App-level handlers deal with Ctrl combos
 
     if (key.return) {
-      // Plain Enter → submit (Shift+Enter is caught by raw stdin handler above)
       if (text.trim()) {
         onSubmit(text);
         setText('');
@@ -266,6 +279,19 @@ export default function App() {
   const [screenshotsDir, setScreenshotsDir] = useState(null);
   const [statusMsg, setStatusMsg]     = useState(null);
   const [inputDisabled, setInputDisabled] = useState(false);
+
+  // Enable Kitty keyboard protocol so terminals like Ghostty send distinct
+  // escape sequences for modifier+key combos (e.g. Shift+Enter = \x1b[13;2u).
+  // Without this, Shift+Enter is indistinguishable from plain Enter.
+  useEffect(() => {
+    process.stdout.write('\x1b[>1u'); // push: enable disambiguate escape codes
+    const restore = () => process.stdout.write('\x1b[<u'); // pop on exit
+    process.on('exit', restore);
+    return () => {
+      restore();
+      process.off('exit', restore);
+    };
+  }, []);
 
   // Track previous app for screenshots
   useEffect(() => {
