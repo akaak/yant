@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Box, Text, useInput, useApp, Static } from 'ink';
-import { createMeetingDir, initNotesFile, appendToNotes, appendScreenshotToNotes, appendSummaryToNotes, finalizeNotes, readNotes, getNotesDir } from './notes.js';
+import { createMeetingDir, initNotesFile, appendToNotes, appendScreenshotToNotes, appendSummaryToNotes, finalizeNotes, readNotes, getNotesDir, saveSession, loadSession, clearSession, appendResumedToNotes } from './notes.js';
 import { captureWindowScreenshot, trackPreviousApp } from './screenshot.js';
 import { summarizeMeetingNotes } from './ai.js';
 
@@ -258,12 +258,13 @@ function MultiLineInput({ onSubmit, placeholder, isActive }) {
 // ─── Help text ────────────────────────────────────────────────────────────────
 const HELP_LINES = [
   { type: 'info',   text: 'Commands:' },
-  { type: 'muted',  text: '  /new <name>      Start a new meeting (ends current if active)' },
+  { type: 'muted',  text: '  /new <name>      Start a new meeting (pauses current if active)' },
+  { type: 'muted',  text: '  /resume          Continue the last meeting from a previous session' },
   { type: 'muted',  text: '  /screenshot      Capture the previous window & embed in notes' },
   { type: 'muted',  text: '  /end             End meeting, generate AI summary, save & close' },
   { type: 'muted',  text: '  /status          Show current meeting info & file path' },
   { type: 'muted',  text: '  /help            Show this help' },
-  { type: 'muted',  text: '  Ctrl+C / /quit   Exit (ends active meeting first)' },
+  { type: 'muted',  text: '  Ctrl+C / /quit   Exit (meeting stays resumable)' },
   { type: 'divider',text: '' },
   { type: 'muted',  text: '  Any other text → appended as a timestamped note line' },
   { type: 'muted',  text: '  Shift+Enter     Insert a new line (multi-line note)' },
@@ -302,15 +303,22 @@ export default function App() {
     setLines(prev => [...prev, { type, text, timestamp: ts, id: Date.now() + Math.random() }]);
   }, []);
 
-  // Boot message
+  // Boot message + previous session detection
   useEffect(() => {
     const t = timeNow();
-    setLines([
+    const session = loadSession();
+    const bootLines = [
       { type: 'system',  text: 'meeting notes  v1.0', timestamp: t, id: 1 },
       { type: 'muted',   text: `Notes saved to ~/meeting-notes/`, timestamp: t, id: 2 },
       { type: 'divider', text: '', timestamp: t, id: 3 },
-      { type: 'info',    text: 'Type /new <meeting name> to start  ·  /help for commands', timestamp: t, id: 4 },
-    ]);
+    ];
+    if (session) {
+      bootLines.push({ type: 'warning', text: `Previous meeting found: "${session.meeting}"`, timestamp: t, id: 4 });
+      bootLines.push({ type: 'info',    text: 'Type /resume to continue it  ·  /new <name> to start fresh', timestamp: t, id: 5 });
+    } else {
+      bootLines.push({ type: 'info',    text: 'Type /new <meeting name> to start  ·  /help for commands', timestamp: t, id: 4 });
+    }
+    setLines(bootLines);
   }, []);
 
   // ── Command handler ─────────────────────────────────────────────────────────
@@ -329,10 +337,33 @@ export default function App() {
     // ── /quit ──────────────────────────────────────────────────────────────
     if (raw === '/quit' || raw === '/exit') {
       if (meeting && notesPath) {
-        finalizeNotes(notesPath);
-        addLine('system', `Meeting "${meeting}" saved.`, ts);
+        saveSession(meeting, notesPath, screenshotsDir);
+        addLine('system', `Meeting "${meeting}" paused — resume it next time with /resume`, ts);
       }
       setTimeout(() => exit(), 300);
+      return;
+    }
+
+    // ── /resume ────────────────────────────────────────────────────────────
+    if (raw === '/resume') {
+      const session = loadSession();
+      if (!session) {
+        addLine('warning', 'No previous meeting to resume.', ts);
+        return;
+      }
+      if (meeting && notesPath) {
+        saveSession(meeting, notesPath, screenshotsDir);
+        addLine('success', `Paused current meeting: "${meeting}"`, ts);
+        addLine('divider', '', ts);
+      }
+      appendResumedToNotes(session.notesPath);
+      setMeeting(session.meeting);
+      setNotesPath(session.notesPath);
+      setScreenshotsDir(session.screenshotsDir);
+      clearSession();
+      addLine('system', `Resumed: ${session.meeting}`, ts);
+      addLine('muted', `File: ${session.notesPath.replace(process.env.HOME, '~')}`, ts);
+      addLine('divider', '', ts);
       return;
     }
 
@@ -431,6 +462,7 @@ export default function App() {
         addLine('divider', '', ts);
         addLine('success', `Meeting "${meeting}" saved → ${notesPath.replace(process.env.HOME, '~')}`, ts);
 
+        clearSession();
         setMeeting(null);
         setNotesPath(null);
         setScreenshotsDir(null);
@@ -440,6 +472,7 @@ export default function App() {
         // If AI fails, still end the meeting
         addLine('warning', `AI summary failed (${e.message}), saving notes without summary.`, ts);
         addLine('success', `Meeting "${meeting}" saved → ${notesPath.replace(process.env.HOME, '~')}`, ts);
+        clearSession();
         setMeeting(null);
         setNotesPath(null);
         setScreenshotsDir(null);

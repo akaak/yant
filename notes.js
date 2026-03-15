@@ -68,3 +68,27 @@ export function readNotes(notesPath) {
 export function getNotesDir() {
   return NOTES_BASE_DIR;
 }
+
+// ─── Session persistence (resume after /quit without /end) ───────────────────
+const SESSION_FILE = path.join(NOTES_BASE_DIR, '.session.json');
+
+export function saveSession(meeting, notesPath, screenshotsDir) {
+  fs.mkdirSync(NOTES_BASE_DIR, { recursive: true });
+  fs.writeFileSync(SESSION_FILE, JSON.stringify({ meeting, notesPath, screenshotsDir }), 'utf8');
+}
+
+export function loadSession() {
+  if (!fs.existsSync(SESSION_FILE)) return null;
+  try { return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')); }
+  catch { return null; }
+}
+
+export function clearSession() {
+  if (fs.existsSync(SESSION_FILE)) fs.unlinkSync(SESSION_FILE);
+}
+
+export function appendResumedToNotes(notesPath) {
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  fs.appendFileSync(notesPath, `\n**Resumed:** ${timeStr}\n\n`, 'utf8');
+}

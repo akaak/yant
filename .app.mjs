@@ -32,13 +32,12 @@ function initNotesFile(meetingDir, meetingName) {
   const dateStr = now.toLocaleDateString("en-US", {
     weekday: "long",
     year: "numeric",
-    month: "long",
+    month: "short",
     day: "numeric"
   });
   const timeStr = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-  const header = `# ${meetingName}
+  const header = `## ${dateStr} >> ${meetingName}
 
-**Date:** ${dateStr}  
 **Started:** ${timeStr}
 
 ---
@@ -85,6 +84,30 @@ function finalizeNotes(notesPath) {
 function readNotes(notesPath) {
   if (!fs.existsSync(notesPath)) return "";
   return fs.readFileSync(notesPath, "utf8");
+}
+var SESSION_FILE = path.join(NOTES_BASE_DIR, ".session.json");
+function saveSession(meeting, notesPath, screenshotsDir) {
+  fs.mkdirSync(NOTES_BASE_DIR, { recursive: true });
+  fs.writeFileSync(SESSION_FILE, JSON.stringify({ meeting, notesPath, screenshotsDir }), "utf8");
+}
+function loadSession() {
+  if (!fs.existsSync(SESSION_FILE)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(SESSION_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function clearSession() {
+  if (fs.existsSync(SESSION_FILE)) fs.unlinkSync(SESSION_FILE);
+}
+function appendResumedToNotes(notesPath) {
+  const now = /* @__PURE__ */ new Date();
+  const timeStr = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+  fs.appendFileSync(notesPath, `
+**Resumed:** ${timeStr}
+
+`, "utf8");
 }
 
 // screenshot.js
@@ -451,12 +474,13 @@ function MultiLineInput({ onSubmit, placeholder, isActive }) {
 }
 var HELP_LINES = [
   { type: "info", text: "Commands:" },
-  { type: "muted", text: "  /new <name>      Start a new meeting (ends current if active)" },
+  { type: "muted", text: "  /new <name>      Start a new meeting (pauses current if active)" },
+  { type: "muted", text: "  /resume          Continue the last meeting from a previous session" },
   { type: "muted", text: "  /screenshot      Capture the previous window & embed in notes" },
   { type: "muted", text: "  /end             End meeting, generate AI summary, save & close" },
   { type: "muted", text: "  /status          Show current meeting info & file path" },
   { type: "muted", text: "  /help            Show this help" },
-  { type: "muted", text: "  Ctrl+C / /quit   Exit (ends active meeting first)" },
+  { type: "muted", text: "  Ctrl+C / /quit   Exit (meeting stays resumable)" },
   { type: "divider", text: "" },
   { type: "muted", text: "  Any other text \u2192 appended as a timestamped note line" },
   { type: "muted", text: "  Shift+Enter     Insert a new line (multi-line note)" },
@@ -487,12 +511,19 @@ function App() {
   }, []);
   useEffect(() => {
     const t = timeNow();
-    setLines([
+    const session = loadSession();
+    const bootLines = [
       { type: "system", text: "meeting notes  v1.0", timestamp: t, id: 1 },
       { type: "muted", text: `Notes saved to ~/meeting-notes/`, timestamp: t, id: 2 },
-      { type: "divider", text: "", timestamp: t, id: 3 },
-      { type: "info", text: "Type /new <meeting name> to start  \xB7  /help for commands", timestamp: t, id: 4 }
-    ]);
+      { type: "divider", text: "", timestamp: t, id: 3 }
+    ];
+    if (session) {
+      bootLines.push({ type: "warning", text: `Previous meeting found: "${session.meeting}"`, timestamp: t, id: 4 });
+      bootLines.push({ type: "info", text: "Type /resume to continue it  \xB7  /new <name> to start fresh", timestamp: t, id: 5 });
+    } else {
+      bootLines.push({ type: "info", text: "Type /new <meeting name> to start  \xB7  /help for commands", timestamp: t, id: 4 });
+    }
+    setLines(bootLines);
   }, []);
   const handleSubmit = useCallback(async (value) => {
     const raw = value.trim();
@@ -504,10 +535,31 @@ function App() {
     }
     if (raw === "/quit" || raw === "/exit") {
       if (meeting && notesPath) {
-        finalizeNotes(notesPath);
-        addLine("system", `Meeting "${meeting}" saved.`, ts);
+        saveSession(meeting, notesPath, screenshotsDir);
+        addLine("system", `Meeting "${meeting}" paused \u2014 resume it next time with /resume`, ts);
       }
       setTimeout(() => exit(), 300);
+      return;
+    }
+    if (raw === "/resume") {
+      const session = loadSession();
+      if (!session) {
+        addLine("warning", "No previous meeting to resume.", ts);
+        return;
+      }
+      if (meeting && notesPath) {
+        saveSession(meeting, notesPath, screenshotsDir);
+        addLine("success", `Paused current meeting: "${meeting}"`, ts);
+        addLine("divider", "", ts);
+      }
+      appendResumedToNotes(session.notesPath);
+      setMeeting(session.meeting);
+      setNotesPath(session.notesPath);
+      setScreenshotsDir(session.screenshotsDir);
+      clearSession();
+      addLine("system", `Resumed: ${session.meeting}`, ts);
+      addLine("muted", `File: ${session.notesPath.replace(process.env.HOME, "~")}`, ts);
+      addLine("divider", "", ts);
       return;
     }
     if (raw === "/status") {
@@ -587,6 +639,7 @@ function App() {
         });
         addLine("divider", "", ts);
         addLine("success", `Meeting "${meeting}" saved \u2192 ${notesPath.replace(process.env.HOME, "~")}`, ts);
+        clearSession();
         setMeeting(null);
         setNotesPath(null);
         setScreenshotsDir(null);
@@ -595,6 +648,7 @@ function App() {
       } catch (e) {
         addLine("warning", `AI summary failed (${e.message}), saving notes without summary.`, ts);
         addLine("success", `Meeting "${meeting}" saved \u2192 ${notesPath.replace(process.env.HOME, "~")}`, ts);
+        clearSession();
         setMeeting(null);
         setNotesPath(null);
         setScreenshotsDir(null);
