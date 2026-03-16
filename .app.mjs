@@ -111,111 +111,46 @@ function appendResumedToNotes(notesPath) {
 }
 
 // screenshot.js
-import { execSync, exec } from "child_process";
+import { exec } from "child_process";
 import path2 from "path";
 import fs2 from "fs";
-var previousAppName = null;
 function trackPreviousApp() {
-  try {
-    const script = `tell application "System Events" to get name of first application process whose frontmost is true`;
-    const result = execSync(`osascript -e '${script}'`, { timeout: 3e3 }).toString().trim();
-    if (result && result !== "Terminal" && result !== "iTerm2" && result !== "iTerm") {
-      previousAppName = result;
-    }
-  } catch (e) {
-  }
 }
-async function captureWindowScreenshot(screenshotsDir, meetingName) {
+function parseRegion(args) {
+  if (!args) return null;
+  const m = args.match(/(\d+)\s*,\s*(\d+)\s*-\s*(\d+)\s*,\s*(\d+)/);
+  if (!m) return null;
+  const [x, y, x2, y2] = [+m[1], +m[2], +m[3], +m[4]];
+  return { x, y, w: x2 - x, h: y2 - y };
+}
+async function captureWindowScreenshot(screenshotsDir, region = null) {
   return new Promise((resolve, reject) => {
     const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const filename = `screenshot-${timestamp}.png`;
     const filepath = path2.join(screenshotsDir, filename);
     fs2.mkdirSync(screenshotsDir, { recursive: true });
-    const findWindowScript = `
-      tell application "System Events"
-        set appList to {"Google Chrome", "Microsoft Edge", "Safari", "Firefox", "Microsoft Teams", "zoom.us", "Slack"}
-        repeat with appName in appList
-          if exists (application process appName) then
-            return appName
-          end if
-        end repeat
-        return ""
-      end tell
-    `;
-    let targetApp = null;
-    try {
-      targetApp = execSync(`osascript -e '${findWindowScript.replace(/\n/g, " ")}'`, {
-        timeout: 3e3
-      }).toString().trim();
-    } catch (e) {
-      targetApp = null;
-    }
-    if (!targetApp) {
-      targetApp = previousAppName;
-    }
-    if (!targetApp) {
-      reject(new Error("No target app found. Make sure a browser or Teams window is open."));
-      return;
-    }
-    const captureScript = `
-      tell application "${targetApp}"
-        activate
-      end tell
-      delay 0.4
-    `;
-    exec(`osascript -e '${captureScript.replace(/\n/g, "\n")}'`, { timeout: 5e3 }, (err) => {
-      const getWindowIdScript = `
+    const regionFlag = region ? `-R ${region.x},${region.y},${region.w},${region.h}` : "";
+    exec(`screencapture -x ${regionFlag} "${filepath}"`, { timeout: 5e3 }, (captureErr) => {
+      const returnScript = `
         tell application "System Events"
-          tell process "${targetApp}"
-            set frontWindow to front window
-            return id of frontWindow
-          end tell
+          repeat with termApp in {"Ghostty","Terminal","iTerm2","iTerm","Alacritty","Warp","Hyper","kitty","WezTerm"}
+            if exists (application process termApp) then
+              tell application process termApp to set frontmost to true
+              exit repeat
+            end if
+          end repeat
         end tell
       `;
-      let windowId = null;
-      try {
-        windowId = execSync(`osascript -e '${getWindowIdScript.replace(/\n/g, " ")}'`, {
-          timeout: 3e3
-        }).toString().trim();
-      } catch (e) {
-        windowId = null;
-      }
-      let screencaptureCmd;
-      if (windowId && windowId !== "") {
-        screencaptureCmd = `screencapture -x -o -l ${windowId} "${filepath}"`;
-      } else {
-        screencaptureCmd = `screencapture -x "${filepath}"`;
-      }
-      exec(screencaptureCmd, { timeout: 5e3 }, (captureErr) => {
-        const returnFocusScript = `
-          tell application "System Events"
-            set terminalApps to {"Terminal", "iTerm2", "iTerm", "Alacritty", "Warp", "Hyper"}
-            repeat with termApp in terminalApps
-              if exists (application process termApp) then
-                tell application process termApp
-                  set frontmost to true
-                end tell
-                return termApp
-              end if
-            end repeat
-          end tell
-        `;
-        exec(`osascript -e '${returnFocusScript.replace(/\n/g, " ")}'`, { timeout: 3e3 }, () => {
-          if (captureErr) {
-            reject(new Error(`Screenshot failed: ${captureErr.message}`));
-            return;
-          }
-          if (!fs2.existsSync(filepath)) {
-            reject(new Error("Screenshot file was not created"));
-            return;
-          }
-          resolve({
-            filename,
-            filepath,
-            relativePath: `screenshots/${filename}`,
-            targetApp
-          });
-        });
+      exec(`osascript -e '${returnScript.replace(/\n/g, " ")}'`, { timeout: 3e3 }, () => {
+        if (captureErr) {
+          reject(new Error(`screencapture failed: ${captureErr.message}`));
+          return;
+        }
+        if (!fs2.existsSync(filepath)) {
+          reject(new Error("Screenshot file was not created"));
+          return;
+        }
+        resolve({ filename, filepath, relativePath: `screenshots/${filename}`, targetApp: "Chrome" });
       });
     });
   });
@@ -476,7 +411,8 @@ var HELP_LINES = [
   { type: "info", text: "Commands:" },
   { type: "muted", text: "  /new <name>      Start a new meeting (pauses current if active)" },
   { type: "muted", text: "  /resume          Continue the last meeting from a previous session" },
-  { type: "muted", text: "  /screenshot      Capture the previous window & embed in notes" },
+  { type: "muted", text: "  /screenshot               Capture full screen & embed in notes" },
+  { type: "muted", text: "  /screenshot x1,y1 - x2,y2 Capture a specific region" },
   { type: "muted", text: "  /end             End meeting, generate AI summary, save & close" },
   { type: "muted", text: "  /status          Show current meeting info & file path" },
   { type: "muted", text: "  /help            Show this help" },
@@ -601,17 +537,29 @@ function App() {
         addLine("warning", "No active meeting. Use /new <name> first.", ts);
         return;
       }
-      addLine("info", "Switching to previous window\u2026", ts);
+      const regionArgs = raw.slice("/screenshot".length).trim();
+      const region = parseRegion(regionArgs);
+      if (regionArgs && !region) {
+        addLine("error", "Bad format. Use: /screenshot 450,200 - 1350,850", ts);
+        return;
+      }
       setInputDisabled(true);
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      addLine("info", "Switch to Chrome now \u2014 capturing in 3\u2026", ts);
+      await sleep(1e3);
+      addLine("info", "2\u2026", ts);
+      await sleep(1e3);
+      addLine("info", "1\u2026", ts);
+      await sleep(1e3);
       setStatusMsg("capturing\u2026");
       try {
-        const info = await captureWindowScreenshot(screenshotsDir, meeting);
+        const info = await captureWindowScreenshot(screenshotsDir, region);
         appendScreenshotToNotes(notesPath, info);
-        addLine("screenshot", `Captured from ${info.targetApp} \u2192 ${info.relativePath}`, ts);
+        const regionNote = region ? ` [${region.w}\xD7${region.h}]` : "";
+        addLine("screenshot", `Captured${regionNote} \u2192 ${info.relativePath}`, ts);
         setStatusMsg(null);
       } catch (e) {
         addLine("error", `Screenshot failed: ${e.message}`, ts);
-        addLine("muted", "Tip: Make sure a browser or Teams window is open.", ts);
         setStatusMsg(null);
       } finally {
         setInputDisabled(false);

@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Box, Text, useInput, useApp, Static } from 'ink';
 import { createMeetingDir, initNotesFile, appendToNotes, appendScreenshotToNotes, appendSummaryToNotes, finalizeNotes, readNotes, getNotesDir, saveSession, loadSession, clearSession, appendResumedToNotes } from './notes.js';
-import { captureWindowScreenshot, trackPreviousApp } from './screenshot.js';
+import { captureWindowScreenshot, trackPreviousApp, parseRegion } from './screenshot.js';
 import { summarizeMeetingNotes } from './ai.js';
 
 // ─── Colour palette (Claude Code-inspired dark terminal) ──────────────────────
@@ -260,7 +260,8 @@ const HELP_LINES = [
   { type: 'info',   text: 'Commands:' },
   { type: 'muted',  text: '  /new <name>      Start a new meeting (pauses current if active)' },
   { type: 'muted',  text: '  /resume          Continue the last meeting from a previous session' },
-  { type: 'muted',  text: '  /screenshot      Capture the previous window & embed in notes' },
+  { type: 'muted',  text: '  /screenshot               Capture full screen & embed in notes' },
+  { type: 'muted',  text: '  /screenshot x1,y1 - x2,y2 Capture a specific region' },
   { type: 'muted',  text: '  /end             End meeting, generate AI summary, save & close' },
   { type: 'muted',  text: '  /status          Show current meeting info & file path' },
   { type: 'muted',  text: '  /help            Show this help' },
@@ -415,18 +416,34 @@ export default function App() {
         return;
       }
 
-      addLine('info', 'Switching to previous window…', ts);
+      const regionArgs = raw.slice('/screenshot'.length).trim();
+      const region = parseRegion(regionArgs);
+
+      if (regionArgs && !region) {
+        addLine('error', 'Bad format. Use: /screenshot 450,200 - 1350,850', ts);
+        return;
+      }
+
       setInputDisabled(true);
+
+      const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+      addLine('info', 'Switch to Chrome now — capturing in 3…', ts);
+      await sleep(1000);
+      addLine('info', '2…', ts);
+      await sleep(1000);
+      addLine('info', '1…', ts);
+      await sleep(1000);
+
       setStatusMsg('capturing…');
 
       try {
-        const info = await captureWindowScreenshot(screenshotsDir, meeting);
+        const info = await captureWindowScreenshot(screenshotsDir, region);
         appendScreenshotToNotes(notesPath, info);
-        addLine('screenshot', `Captured from ${info.targetApp} → ${info.relativePath}`, ts);
+        const regionNote = region ? ` [${region.w}×${region.h}]` : '';
+        addLine('screenshot', `Captured${regionNote} → ${info.relativePath}`, ts);
         setStatusMsg(null);
       } catch (e) {
         addLine('error', `Screenshot failed: ${e.message}`, ts);
-        addLine('muted', 'Tip: Make sure a browser or Teams window is open.', ts);
         setStatusMsg(null);
       } finally {
         setInputDisabled(false);

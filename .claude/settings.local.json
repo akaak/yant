@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(npx esbuild:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(ls:*)"
     ]
   }
 }
