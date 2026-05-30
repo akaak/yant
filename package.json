@@ -2,15 +2,14 @@
   "name": "@akaak/yant",
   "version": "1.0.0",
   "description": "Yet Another Note Tool — a terminal REPL for meeting notes with screenshots and AI summaries",
-  "main": "index.js",
   "type": "module",
   "bin": {
-    "yant": "./.app.mjs"
+    "yant": "./app.mjs"
   },
   "scripts": {
-    "prepare": "esbuild index.js --bundle --packages=external --platform=node --jsx=automatic --loader:.js=jsx --format=esm --outfile=.app.mjs",
-    "start": "npm run prepare && node .app.mjs",
-    "dev": "esbuild index.js --bundle --packages=external --platform=node --jsx=automatic --loader:.js=jsx --format=esm --outfile=.app.mjs && node --watch .app.mjs"
+    "prepare": "esbuild index.js --bundle --packages=external --platform=node --jsx=automatic --loader:.js=jsx --format=esm --outfile=app.mjs",
+    "start": "npm run prepare && node app.mjs",
+    "dev": "esbuild index.js --bundle --packages=external --platform=node --jsx=automatic --loader:.js=jsx --format=esm --outfile=app.mjs && node --watch app.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

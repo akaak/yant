@@ -6,4 +6,5 @@ yarn-error.log*
 .env.local
 .DS_Store
 *.zip
+app.mjs
 .claude/settings.local.json

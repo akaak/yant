@@ -5,3 +5,4 @@ notes.js
 screenshot.js
 .DS_Store
 .claude/
+package-lock.json
