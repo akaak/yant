@@ -129,6 +129,10 @@ function MultiLineInput({ onSubmit, placeholder, isActive }) {
   const cursorRef = useRef(cursor);
   const isActiveRef = useRef(isActive);
   const shiftEnterRef = useRef(false); // flag to suppress ink's spurious key.return
+  // Command history (newest first), index into it, and draft saved before navigating
+  const historyRef = useRef([]);
+  const historyIdxRef = useRef(-1);
+  const draftRef = useRef('');
   useEffect(() => { textRef.current = text; }, [text]);
   useEffect(() => { cursorRef.current = cursor; }, [cursor]);
   useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
@@ -171,6 +175,9 @@ function MultiLineInput({ onSubmit, placeholder, isActive }) {
 
     if (key.return) {
       if (text.trim()) {
+        historyRef.current = [text, ...historyRef.current];
+        historyIdxRef.current = -1;
+        draftRef.current = '';
         onSubmit(text);
         setText('');
         setCursor(0);
@@ -204,6 +211,17 @@ function MultiLineInput({ onSubmit, placeholder, isActive }) {
         let newPos = 0;
         for (let i = 0; i < lineIdx - 1; i++) newPos += lines[i].length + 1;
         setCursor(newPos + newCol);
+      } else {
+        // On first line — navigate history backward
+        const history = historyRef.current;
+        if (history.length > 0) {
+          if (historyIdxRef.current === -1) draftRef.current = text;
+          const newIdx = Math.min(historyIdxRef.current + 1, history.length - 1);
+          historyIdxRef.current = newIdx;
+          const entry = history[newIdx];
+          setText(entry);
+          setCursor(entry.length);
+        }
       }
       return;
     }
@@ -216,6 +234,15 @@ function MultiLineInput({ onSubmit, placeholder, isActive }) {
         let newPos = 0;
         for (let i = 0; i <= lineIdx; i++) newPos += lines[i].length + 1;
         setCursor(newPos + newCol);
+      } else {
+        // On last line — navigate history forward
+        if (historyIdxRef.current > -1) {
+          const newIdx = historyIdxRef.current - 1;
+          historyIdxRef.current = newIdx;
+          const entry = newIdx === -1 ? draftRef.current : historyRef.current[newIdx];
+          setText(entry);
+          setCursor(entry.length);
+        }
       }
       return;
     }
@@ -410,13 +437,14 @@ export default function App() {
     }
 
     // ── /screenshot ────────────────────────────────────────────────────────
-    if (raw === '/screenshot' || raw.startsWith('/screenshot')) {
+    if (raw === '/screenshot' || raw.startsWith('/screenshot') || raw === '/ss' || raw.startsWith('/ss ')) {
       if (!meeting || !notesPath) {
         addLine('warning', 'No active meeting. Use /new <name> first.', ts);
         return;
       }
 
-      const regionArgs = raw.slice('/screenshot'.length).trim();
+      const cmdLen = raw.startsWith('/ss') ? '/ss'.length : '/screenshot'.length;
+      const regionArgs = raw.slice(cmdLen).trim();
       const region = parseRegion(regionArgs);
 
       if (regionArgs && !region) {

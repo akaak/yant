@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npx esbuild:*)",
       "Bash(node:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(git *)"
     ]
   }
 }
