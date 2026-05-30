@@ -4,10 +4,10 @@
   "description": "Yet Another Note Tool — a terminal REPL for meeting notes with screenshots and AI summaries",
   "type": "module",
   "bin": {
-    "yant": "./app.mjs"
+    "yant": "app.mjs"
   },
   "scripts": {
-    "prepare": "esbuild index.js --bundle --packages=external --platform=node --jsx=automatic --loader:.js=jsx --format=esm --outfile=app.mjs",
+    "prepare": "esbuild index.js --bundle --packages=external --platform=node --jsx=automatic --loader:.js=jsx --format=esm --outfile=app.mjs && chmod +x app.mjs",
     "start": "npm run prepare && node app.mjs",
     "dev": "esbuild index.js --bundle --packages=external --platform=node --jsx=automatic --loader:.js=jsx --format=esm --outfile=app.mjs && node --watch app.mjs"
   },
@@ -26,9 +26,16 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/akaak/yant.git"
+    "url": "git+https://github.com/akaak/yant.git"
   },
-  "keywords": ["meeting", "notes", "cli", "ai", "terminal", "anthropic"],
+  "keywords": [
+    "meeting",
+    "notes",
+    "cli",
+    "ai",
+    "terminal",
+    "anthropic"
+  ],
   "engines": {
     "node": ">=18.0.0"
   },
