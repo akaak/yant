@@ -1,7 +1,7 @@
 {
   "name": "@akaak/yant",
   "version": "1.0.0",
-  "description": "Claude Code-style terminal app for meeting notes",
+  "description": "Yet Another Note Tool — a terminal REPL for meeting notes with screenshots and AI summaries",
   "main": "index.js",
   "type": "module",
   "bin": {
